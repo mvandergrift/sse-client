@@ -1,14 +1,14 @@
-use std::io::prelude::*;
-use std::io::Error;
-use std::net::{Shutdown, TcpStream};
-use url::Url;
-use std::thread;
-use std::sync::Arc;
-use std::sync::Mutex;
-use std::io::BufReader;
-use std::time::Duration;
 #[cfg(feature = "native-tls")]
 use crate::tls::MaybeTlsStream;
+use std::io::prelude::*;
+use std::io::BufReader;
+use std::io::Error;
+use std::net::{Shutdown, TcpStream};
+use std::sync::Arc;
+use std::sync::Mutex;
+use std::thread;
+use std::time::Duration;
+use url::Url;
 
 #[cfg(feature = "native-tls")]
 type InnerStream = MaybeTlsStream;
@@ -31,7 +31,7 @@ pub enum State {
     /// Stream is open.
     Open,
     /// State when connection is closed and client won't try to reconnect.
-    Closed
+    Closed,
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,7 +39,7 @@ enum StreamAction {
     Reconnect(String),
     Close(String),
     Move(Url),
-    MovePermanently(Url)
+    MovePermanently(Url),
 }
 
 pub struct EventStream {
@@ -49,7 +49,7 @@ pub struct EventStream {
     on_open_listener: CallbackNoArgs,
     on_message_listener: Callback,
     on_error_listener: Callback,
-    last_event_id: LastIdWrapper
+    last_event_id: LastIdWrapper,
 }
 
 impl EventStream {
@@ -61,7 +61,7 @@ impl EventStream {
             on_open_listener: Arc::new(Mutex::new(None)),
             on_message_listener: Arc::new(Mutex::new(None)),
             on_error_listener: Arc::new(Mutex::new(None)),
-            last_event_id: Arc::new(Mutex::new(None))
+            last_event_id: Arc::new(Mutex::new(None)),
         };
 
         event_stream.listen();
@@ -79,7 +79,7 @@ impl EventStream {
             Arc::clone(&self.on_message_listener),
             Arc::clone(&self.on_error_listener),
             Arc::new(Mutex::new(0)),
-            Arc::clone(&self.last_event_id)
+            Arc::clone(&self.last_event_id),
         );
     }
 
@@ -91,17 +91,26 @@ impl EventStream {
         }
     }
 
-    pub fn on_open<F>(&mut self, listener: F) where F: Fn() + Send + 'static {
+    pub fn on_open<F>(&mut self, listener: F)
+    where
+        F: Fn() + Send + 'static,
+    {
         let mut on_open_listener = self.on_open_listener.lock().unwrap();
         *on_open_listener = Some(Box::new(listener));
     }
 
-    pub fn on_message<F>(&mut self, listener: F) where F: Fn(String) + Send + 'static {
+    pub fn on_message<F>(&mut self, listener: F)
+    where
+        F: Fn(String) + Send + 'static,
+    {
         let mut on_message_listener = self.on_message_listener.lock().unwrap();
         *on_message_listener = Some(Box::new(listener));
     }
 
-    pub fn on_error<F>(&mut self, listener: F) where F: Fn(String) + Send + 'static {
+    pub fn on_error<F>(&mut self, listener: F)
+    where
+        F: Fn(String) + Send + 'static,
+    {
         let mut on_error_listener = self.on_error_listener.lock().unwrap();
         *on_error_listener = Some(Box::new(listener));
     }
@@ -126,53 +135,90 @@ fn listen_stream(
     on_message: Callback,
     on_error: Callback,
     failed_attempts: Arc<Mutex<u32>>,
-    last_event_id: LastIdWrapper
+    last_event_id: LastIdWrapper,
 ) {
     thread::spawn(move || {
         let action = match connect_event_stream(&connection_url, &stream, &last_event_id) {
             Ok(stream) => read_stream(stream, &state, &on_open, &on_message, &failed_attempts),
-            Err(error) => Err(StreamAction::Reconnect(error.to_string()))
+            Err(error) => Err(StreamAction::Reconnect(error.to_string())),
         };
 
-        if let Err(stream_action) = action  {
+        if let Err(stream_action) = action {
             match stream_action {
                 StreamAction::Reconnect(ref error) => {
                     let mut state_lock = state.lock().unwrap();
                     *state_lock = State::Connecting;
-                    handle_error(error.to_string(),  &on_error);
-                    reconnect_stream(url, stream, Arc::clone(&state), on_open, on_message, on_error, failed_attempts, last_event_id);
-                },
+                    handle_error(error.to_string(), &on_error);
+                    reconnect_stream(
+                        url,
+                        stream,
+                        Arc::clone(&state),
+                        on_open,
+                        on_message,
+                        on_error,
+                        failed_attempts,
+                        last_event_id,
+                    );
+                }
                 StreamAction::Close(ref error) => {
                     let mut state_lock = state.lock().unwrap();
                     *state_lock = State::Closed;
                     handle_error(error.to_string(), &on_error);
-                },
+                }
                 StreamAction::Move(redirect_url) => {
                     let mut state_lock = state.lock().unwrap();
                     *state_lock = State::Connecting;
 
-                    listen_stream(url, Arc::new(redirect_url), stream, Arc::clone(&state), on_open, on_message, on_error, failed_attempts, last_event_id);
-                },
+                    listen_stream(
+                        url,
+                        Arc::new(redirect_url),
+                        stream,
+                        Arc::clone(&state),
+                        on_open,
+                        on_message,
+                        on_error,
+                        failed_attempts,
+                        last_event_id,
+                    );
+                }
                 StreamAction::MovePermanently(redirect_url) => {
                     let mut state_lock = state.lock().unwrap();
                     *state_lock = State::Connecting;
 
-                    listen_stream(Arc::new(redirect_url.clone()), Arc::new(redirect_url), stream, Arc::clone(&state), on_open, on_message, on_error, failed_attempts, last_event_id);
+                    listen_stream(
+                        Arc::new(redirect_url.clone()),
+                        Arc::new(redirect_url),
+                        stream,
+                        Arc::clone(&state),
+                        on_open,
+                        on_message,
+                        on_error,
+                        failed_attempts,
+                        last_event_id,
+                    );
                 }
             };
         }
     });
 }
 
-fn connect_event_stream(url: &Url, stream: &StreamWrapper, last_event_id: &LastIdWrapper) -> Result<InnerStream, Error> {
+fn connect_event_stream(
+    url: &Url,
+    stream: &StreamWrapper,
+    last_event_id: &LastIdWrapper,
+) -> Result<InnerStream, Error> {
     let connection_stream = event_stream_handshake(url, last_event_id)?;
     let mut stream = stream.lock().unwrap();
 
     #[cfg(feature = "native-tls")]
-    { *stream = Some(connection_stream.clone_plain_handle().unwrap()); }
+    {
+        *stream = Some(connection_stream.clone_plain_handle().unwrap());
+    }
 
     #[cfg(not(feature = "native-tls"))]
-    { *stream = Some(connection_stream.try_clone().unwrap()); }
+    {
+        *stream = Some(connection_stream.try_clone().unwrap());
+    }
 
     Ok(connection_stream)
 }
@@ -194,11 +240,12 @@ fn event_stream_handshake(url: &Url, last_event_id: &LastIdWrapper) -> Result<In
     #[cfg(not(feature = "native-tls"))]
     let mut stream = TcpStream::connect(host)?;
 
+    #[cfg(not(target_os = "macos"))]
     stream.set_read_timeout(Some(Duration::from_millis(60000)))?;
 
     let extra_headers = match *(last_event_id.lock().unwrap()) {
         Some(ref last_id) => format!("Last-Event-ID: {}\r\n", last_id),
-        None => String::from("")
+        None => String::from(""),
     };
 
     let request = format!(
@@ -217,7 +264,7 @@ fn event_stream_handshake(url: &Url, last_event_id: &LastIdWrapper) -> Result<In
 fn get_host(url: &Url) -> String {
     let mut host = match url.host_str() {
         Some(h) => String::from(h),
-        None => String::from("localhost")
+        None => String::from("localhost"),
     };
 
     if let Some(port) = url.port_or_known_default() {
@@ -230,7 +277,7 @@ fn get_host(url: &Url) -> String {
 fn get_path_with_query_params(url: &Url) -> String {
     match url.query() {
         Some(query) => format!("{}?{}", url.path(), query),
-        None => url.path().to_owned()
+        None => url.path().to_owned(),
     }
 }
 
@@ -239,7 +286,7 @@ fn read_stream(
     state: &StateWrapper,
     on_open: &CallbackNoArgs,
     on_message: &Callback,
-    failed_attempts: &Arc<Mutex<u32>>
+    failed_attempts: &Arc<Mutex<u32>>,
 ) -> Result<(), StreamAction> {
     let mut reader = BufReader::new(connection_stream);
 
@@ -251,19 +298,25 @@ fn read_stream(
     for line in reader.lines() {
         let mut state = state.lock().unwrap();
 
-        let line = line.map_err(|error| {
-            StreamAction::Reconnect(error.to_string())
-        })?;
+        let line = line.map_err(|error| StreamAction::Reconnect(error.to_string()))?;
 
         match *state {
-            State::Connecting => handle_headers(line.clone(), &mut state, &on_open, status_code, failed_attempts)?,
-            _ => handle_messages(line.clone(), &on_message)
+            State::Connecting => handle_headers(
+                line.clone(),
+                &mut state,
+                &on_open,
+                status_code,
+                failed_attempts,
+            )?,
+            _ => handle_messages(line.clone(), &on_message),
         }
     }
 
     match *(state.lock().unwrap()) {
         State::Closed => Ok(()),
-        _ => Err(StreamAction::Reconnect(String::from("connection closed by server")))
+        _ => Err(StreamAction::Reconnect(String::from(
+            "connection closed by server",
+        ))),
     }
 }
 
@@ -272,7 +325,7 @@ fn handle_headers(
     state: &mut State,
     on_open: &CallbackNoArgs,
     status_code: i32,
-    failed_attempts: &Arc<Mutex<u32>>
+    failed_attempts: &Arc<Mutex<u32>>,
 ) -> Result<(), StreamAction> {
     if line == "" {
         handle_open_connection(state, on_open, failed_attempts)
@@ -285,7 +338,11 @@ fn handle_headers(
     }
 }
 
-fn handle_open_connection(state: &mut State, on_open: &CallbackNoArgs, failed_attempts: &Arc<Mutex<u32>>) -> Result<(), StreamAction> {
+fn handle_open_connection(
+    state: &mut State,
+    on_open: &CallbackNoArgs,
+    failed_attempts: &Arc<Mutex<u32>>,
+) -> Result<(), StreamAction> {
     *state = State::Open;
     let on_open = on_open.lock().unwrap();
     if let Some(ref f) = *on_open {
@@ -311,8 +368,8 @@ fn validate_status_code(line: String) -> Result<i32, StreamAction> {
     match status_code {
         200 | 301 | 302 | 303 | 307 => Ok(status_code),
         204 => Err(StreamAction::Close(status.to_string())),
-        201 ..= 203 | 205 ..= 299 => Err(StreamAction::Reconnect(status.to_string())),
-        _ => Err(StreamAction::Close(status.to_string()))
+        201..=203 | 205..=299 => Err(StreamAction::Reconnect(status.to_string())),
+        _ => Err(StreamAction::Close(status.to_string())),
     }
 }
 
@@ -322,7 +379,7 @@ fn handle_new_location(line: String, status_code: i32) -> Result<(), StreamActio
     match status_code {
         301 => Err(StreamAction::MovePermanently(Url::parse(location).unwrap())),
         302 | 303 | 307 => Err(StreamAction::Move(Url::parse(location).unwrap())),
-        _ => Ok(())
+        _ => Ok(()),
     }
 }
 
@@ -348,7 +405,7 @@ fn reconnect_stream(
     on_message: Callback,
     on_error: Callback,
     failed_attempts: Arc<Mutex<u32>>,
-    last_event_id: LastIdWrapper
+    last_event_id: LastIdWrapper,
 ) {
     let mut attempts = failed_attempts.lock().unwrap();
     let base: u64 = 2;
@@ -356,27 +413,37 @@ fn reconnect_stream(
     *attempts += 1;
 
     thread::sleep(Duration::from_millis(reconnection_time));
-    listen_stream(url.clone(), url, stream, Arc::clone(&state), on_open, on_message, on_error, Arc::clone(&failed_attempts), last_event_id);
+    listen_stream(
+        url.clone(),
+        url,
+        stream,
+        Arc::clone(&state),
+        on_open,
+        on_message,
+        on_error,
+        Arc::clone(&failed_attempts),
+        last_event_id,
+    );
 }
-
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use http_test_server::http::Status;
+    use http_test_server::{Resource, TestServer};
     use std::sync::mpsc;
     use std::time::Duration;
-    use http_test_server::{ TestServer, Resource };
-    use http_test_server::http::Status;
 
     fn setup() -> (TestServer, Resource, Url) {
         let server = TestServer::new().unwrap();
         let resource = server.create_resource("/sub");
-        resource.header("Content-Type", "text/event-stream").stream();
+        resource
+            .header("Content-Type", "text/event-stream")
+            .stream();
         let address = format!("http://localhost:{}/sub", server.port());
         let url = Url::parse(address.as_str()).unwrap();
         (server, resource, url)
     }
-
 
     #[test]
     fn should_create_stream_object() {
@@ -472,7 +539,7 @@ mod tests {
 
         while event_stream.state() != State::Open {
             thread::sleep(Duration::from_millis(100));
-        };
+        }
 
         stream_endpoint.close_open_connections();
 
@@ -564,7 +631,6 @@ mod tests {
         event_stream.on_error(move |message| {
             error_tx.send(message).unwrap();
         });
-
 
         let message = error_rx.recv().unwrap();
         assert_eq!(message, "Wrong Content-Type");
@@ -749,24 +815,24 @@ mod tests {
         event_stream.close();
     }
 
-
     #[test]
     fn should_try_to_reconnect_with_an_exponential_backoff() {
         let (_server, stream_endpoint, address) = setup();
         stream_endpoint.status(Status::Accepted);
         let event_stream = EventStream::new(address).unwrap();
 
-        for _ in 0 .. 20 {
+        for _ in 0..20 {
             thread::sleep(Duration::from_millis(100))
         }
 
         let retries_in_first_two_seconds = stream_endpoint.request_count();
 
-        for _ in 0 .. 20 {
+        for _ in 0..20 {
             thread::sleep(Duration::from_millis(100))
         }
 
-        let retries_in_the_next_two_seconds = stream_endpoint.request_count() - retries_in_first_two_seconds;
+        let retries_in_the_next_two_seconds =
+            stream_endpoint.request_count() - retries_in_first_two_seconds;
 
         assert!(retries_in_first_two_seconds > retries_in_the_next_two_seconds);
 
@@ -779,7 +845,7 @@ mod tests {
         stream_endpoint.status(Status::Accepted);
         let event_stream = EventStream::new(address).unwrap();
 
-        for _ in 0 .. 20 {
+        for _ in 0..20 {
             thread::sleep(Duration::from_millis(100))
         }
 
@@ -794,13 +860,17 @@ mod tests {
         stream_endpoint.status(Status::Accepted);
         stream_endpoint.close_open_connections();
 
-        for _ in 0 .. 20 {
+        for _ in 0..20 {
             thread::sleep(Duration::from_millis(100))
         }
 
-        let retries_in_the_next_two_seconds = stream_endpoint.request_count() - retries_in_first_two_seconds;
+        let retries_in_the_next_two_seconds =
+            stream_endpoint.request_count() - retries_in_first_two_seconds;
 
-        assert_eq!(retries_in_first_two_seconds, retries_in_the_next_two_seconds);
+        assert_eq!(
+            retries_in_first_two_seconds,
+            retries_in_the_next_two_seconds
+        );
 
         event_stream.close();
     }
@@ -841,8 +911,6 @@ mod tests {
         let state = event_stream.state();
         assert_eq!(state, State::Open);
 
-
         event_stream.close();
     }
 }
-
