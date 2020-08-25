@@ -1,5 +1,6 @@
 #[cfg(feature = "native-tls")]
 use crate::tls::MaybeTlsStream;
+use rand::{thread_rng, Rng};
 use std::io::prelude::*;
 use std::io::BufReader;
 use std::io::Error;
@@ -409,7 +410,9 @@ fn reconnect_stream(
 ) {
     let mut attempts = failed_attempts.lock().unwrap();
     let base: u64 = 2;
-    let reconnection_time = INITIAL_RECONNECTION_TIME_IN_MS + (15 * (base.pow(*attempts) - 1));
+    let mut rng = thread_rng();
+    let n: u64 = rng.gen_range(1, 99);
+    let reconnection_time = INITIAL_RECONNECTION_TIME_IN_MS + (n * (base.pow(*attempts) - 1));
     *attempts += 1;
 
     thread::sleep(Duration::from_millis(reconnection_time));
